@@ -1,0 +1,16 @@
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2026-09-19T17-05-25Z
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    enviroment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+volumes:
+  minio_data:
