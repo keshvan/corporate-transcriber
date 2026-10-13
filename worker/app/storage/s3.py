@@ -10,14 +10,9 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import Settings
+from app.storage.errors import ObjectNotFoundError, StorageError
 
 _NOT_FOUND_CODES = {"404", "NoSuchKey", "NotFound"}
-
-class StorageError(Exception):
-    pass
-
-class ObjectNotFoundError(StorageError):
-    pass
 
 @contextmanager
 def _translate(what: str) -> Iterator[None]:
