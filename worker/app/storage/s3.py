@@ -40,7 +40,7 @@ class S3Storage:
             aws_secret_access_key=s.s3_secret_key.get_secret_value(),
             config=Config(
                 signature_version="s3v4",
-                s3={"addresing_style": "path"},
+                s3={"addressing_style": "path"},
                 retries={"max_attempts": 5, "mode": "standard"},
                 connect_timeout=5,
                 read_timeout=60,
