@@ -5,12 +5,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file="../.env")
 
     s3_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "minioadmin"
     s3_secret_key: SecretStr = SecretStr("minioadmin")
     s3_bucket: str = "audio"
+
+    hf_token: SecretStr
+
+    worker_whisper_model: str = "small"
+    worker_device: str = "cpu"
+    worker_compute_type: str = "float32"
+    worker_models_dir: str | None = None
+    worker_beam_size: int = 5
 
 @lru_cache
 def get_settings() -> Settings:
