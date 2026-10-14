@@ -54,7 +54,7 @@ def to_wav_16k_mono(src: Path, dst: Path, timeout: float = 900) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".part")
     cmd = [
-        "ffmpeg", "-nostdin", "-hide_banner", "-log_level", "error", "-y",
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(src),
         "-vn", "-map", "0:a:0",
         "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
