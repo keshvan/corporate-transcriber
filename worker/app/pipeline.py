@@ -1,13 +1,16 @@
 import logging
 import tempfile
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from app.domain import SpeakerEmbeddings, SpeakerMatch, SpeakerTurn
 from app.media.ffmpeg import probe_audio, to_wav_16k_mono
-from app.schemas.transcript import Transcript
+from app.schemas.transcript import Segment, SpeakerInfo, Transcript
 
 log = logging.getLogger("pipeline")
+
 
 class BlobStore(Protocol):
     def download_file(self, uri: str, dest: Path) -> Path: ...
@@ -15,6 +18,19 @@ class BlobStore(Protocol):
 class Transcriber(Protocol):
     def transcribe(self, wav: Path, language: str | None = None) -> Transcript: ...
 
+class Diarizer(Protocol):
+    def diarize(self, wav: Path, num_speakers: int | None = None) -> list[SpeakerTurn]: ...
+
+class SpeakerEmbedder(Protocol):
+    def embed(self, wav: Path, turns: list[SpeakerTurn]) -> SpeakerEmbeddings: ...
+
+class SpeakerIdentifier(Protocol):
+    def identify(self, embeddings: SpeakerEmbeddings) -> dict[str, SpeakerMatch | None]: ...
+
+@dataclass(frozen=True)
+class PipelineResult:
+    transcript: Transcript
+    speaker_embeddings: SpeakerEmbeddings
 
 @dataclass(frozen=True)
 class TranscribeJob:
@@ -23,16 +39,34 @@ class TranscribeJob:
     audio_uri: str
     language: str | None = None
 
+def assign_labels(segments: list[Segment], turns: list[SpeakerTurn]) -> list[Segment]:
+    result = []
+    for seg in segments:
+        overlap: dict[str, int] = defaultdict(int)
+        for t in turns:
+            ms = min(seg.end_ms, t.end_ms) - max(seg.start_ms, t.start_ms)
+            if ms > 0:
+                overlap[t.label] += ms
+        label = max(overlap, key=overlap.__getitem__) if overlap else None
+        result.append(seg.model_copy(update={"label": label}))
+    return result
+
 class TranscribePipeline:
     def __init__(
         self,
         storage: BlobStore,
-        asr: Transcriber
+        asr: Transcriber,
+        diarizer: Diarizer,
+        embedder: SpeakerEmbedder,
+        identifier: SpeakerIdentifier,
     ) -> None:
         self._storage = storage
         self._asr = asr
+        self._diarizer = diarizer
+        self._embedder = embedder
+        self._identifier = identifier
 
-    def run(self, job: TranscribeJob) -> Transcript:
+    def run(self, job: TranscribeJob):
         ids = {"job_id": job.job_id, "meeting_id": job.meeting_id}
         log.info("pipeline started", extra=ids)
 
@@ -52,5 +86,38 @@ class TranscribePipeline:
                 extra={**ids, "segments": len(transcript.segments), "language": transcript.language},
             )
 
+            turns = self._diarizer.diarize(wav)
+            log.info(
+                "diarized",
+                extra={**ids, "turns": len(turns), "speakers": len({t.label for t in turns})},
+            )
+
+            segments = assign_labels(transcript.segments, turns)
+
+            embeddings = self._embedder.embed(wav, turns)
+            log.info("embeddings computed", extra={**ids, "speakers": len(embeddings.vectors)})
+
+            matches = self._identifier.identify(embeddings)
+            log.info(
+                "speakers identified",
+                extra={**ids, "identified": sum(1 for m in matches.values() if m)},
+            )
+
+            labels = sorted({s.label for s in segments if s.label})
+            speakers = []
+            for label in labels:
+                m = matches.get(label)
+                speakers.append(
+                    SpeakerInfo(
+                        label=label,
+                        person_id=m.person_id if m else None,
+                        name=m.name if m else None,
+                        score=m.score if m else None,
+                    )
+                )
+
+            transcript = transcript.model_copy(
+                update={"segments": segments, "speakers": speakers}
+            )
             log.info("job finished", extra=ids)
-            return transcript
+            return PipelineResult(transcript, embeddings)
