@@ -3,7 +3,10 @@ from uuid import uuid4
 
 from app.config import Settings, get_settings
 from app.models.asr import WhisperTranscriber
+from app.models.diarizer import PyannoteDiarizer
+from app.models.embedder import SpeechBrainEmbedder
 from app.pipeline import TranscribeJob, TranscribePipeline
+from app.speakers.identifier import SpeakerIdentifier
 from app.storage.s3 import S3Storage
 
 logging.basicConfig(
@@ -17,6 +20,9 @@ def build_pipeline(settings: Settings) -> TranscribePipeline:
     return TranscribePipeline(
         storage=S3Storage.from_settings(settings),
         asr=asr,
+        diarizer=PyannoteDiarizer.from_settings(settings),
+        embedder=SpeechBrainEmbedder.from_settings(settings),
+        identifier=SpeakerIdentifier(),
     )
 
 def main():
@@ -30,13 +36,15 @@ def main():
         language="ru",
     )
 
-    transcript = pipeline.run(job)
+    result = pipeline.run(job)
+    transcript = result.transcript
 
     print(f"Language: {transcript.language}")
     print(f"Segments: {len(transcript.segments)}")
+    print(f"Speakers: {[s.label for s in transcript.speakers]}")
 
     for segment in transcript.segments:
-        print(f"[{segment.start_ms} - {segment.end_ms}] {segment.text}")
+        print(f"[{segment.start_ms} - {segment.end_ms}] {segment.label}: {segment.text}")
 
 
 if __name__ == "__main__":
