@@ -54,12 +54,16 @@ class SpeechBrainEmbedder:
             by_label[t.label].append(t)
 
         vectors: dict[str, np.ndarray] = {}
+        speech_ms: dict[str, int] = {}
         for label, label_turns in by_label.items():
-            vector = self._embed_speaker(wav, label_turns)
-            if vector is not None:
-                vectors[label] = vector
+            result = self._embed_speaker(wav, label_turns)
+            if result is None:
+                continue
+            vector, used_ms = result
+            vectors[label] = vector
+            speech_ms[label] = used_ms
 
-        return SpeakerEmbeddings(model=self._model_name, vectors=vectors)
+        return SpeakerEmbeddings(model=self._model_name, vectors=vectors, speech_ms=speech_ms)
 
     def _select(self, turns: list[SpeakerTurn]) -> list[tuple[int, int]]:
         chunks: list[tuple[int, int]] = []
@@ -75,7 +79,7 @@ class SpeechBrainEmbedder:
         return chunks
 
     @torch.inference_mode()
-    def _embed_speaker(self, wav: Path, turns: list[SpeakerTurn]) -> np.ndarray | None:
+    def _embed_speaker(self, wav: Path, turns: list[SpeakerTurn]) -> tuple[np.ndarray, int] | None:
         vectors: list[np.ndarray] = []
         weights: list[int] = []
 
@@ -93,7 +97,7 @@ class SpeechBrainEmbedder:
             return None
 
         mean = np.average(np.stack(vectors), axis=0, weights=weights)
-        return mean / np.linalg.norm(mean)
+        return mean / np.linalg.norm(mean),sum(weights)
 
     def _read(self, wav: Path, start_ms: int, end_ms: int) -> torch.Tensor:
         data, sr = sf.read(
