@@ -19,6 +19,7 @@ class SpeakerTurn:
 class SpeakerEmbeddings:
     model: str
     vectors: dict[str, np.ndarray]
+    speech_ms: dict[str, int]
 
 @dataclass(frozen=True)
 class SpeakerMatch:
