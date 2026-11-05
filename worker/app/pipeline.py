@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 import logging
 import tempfile
 from collections import defaultdict
@@ -26,6 +27,14 @@ class SpeakerEmbedder(Protocol):
 
 class SpeakerIdentifier(Protocol):
     def identify(self, embeddings: SpeakerEmbeddings) -> dict[str, SpeakerMatch | None]: ...
+
+class SpeakerStore(Protocol):
+    def save(
+        self,
+        meeting_id: str,
+        embeddings: SpeakerEmbeddings,
+        matches: Mapping[str, SpeakerMatch | None],
+    ) -> None: ...
 
 @dataclass(frozen=True)
 class PipelineResult:
@@ -59,12 +68,14 @@ class TranscribePipeline:
         diarizer: Diarizer,
         embedder: SpeakerEmbedder,
         identifier: SpeakerIdentifier,
+        store: SpeakerStore,
     ) -> None:
         self._storage = storage
         self._asr = asr
         self._diarizer = diarizer
         self._embedder = embedder
         self._identifier = identifier
+        self._store = store
 
     def run(self, job: TranscribeJob):
         ids = {"job_id": job.job_id, "meeting_id": job.meeting_id}
@@ -102,6 +113,8 @@ class TranscribePipeline:
                 "speakers identified",
                 extra={**ids, "identified": sum(1 for m in matches.values() if m)},
             )
+
+            self._store.save(job.meeting_id, embeddings, matches)
 
             labels = sorted({s.label for s in segments if s.label})
             speakers = []
