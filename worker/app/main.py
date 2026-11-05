@@ -1,12 +1,17 @@
 import logging
 from uuid import uuid4
 
+from qdrant_client.qdrant_client import QdrantClient
+
 from app.config import Settings, get_settings
 from app.models.asr import WhisperTranscriber
 from app.models.diarizer import PyannoteDiarizer
 from app.models.embedder import SpeechBrainEmbedder
 from app.pipeline import TranscribeJob, TranscribePipeline
-from app.speakers.identifier import SpeakerIdentifier
+from app.speakers.identifier import QdrantSpeakerIdentifier
+from app.speakers.store import QdrantSpeakerStore
+from app.speakers.voice_collection import ensure_voice_collection
+from app.storage.qdrant import create_qdrant_client
 from app.storage.s3 import S3Storage
 
 logging.basicConfig(
@@ -14,7 +19,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-def build_pipeline(settings: Settings) -> TranscribePipeline:
+def build_pipeline(settings: Settings, qdrant: QdrantClient) -> TranscribePipeline:
     asr = WhisperTranscriber.from_settings(settings)
     asr.warmup()
     return TranscribePipeline(
@@ -22,12 +27,15 @@ def build_pipeline(settings: Settings) -> TranscribePipeline:
         asr=asr,
         diarizer=PyannoteDiarizer.from_settings(settings),
         embedder=SpeechBrainEmbedder.from_settings(settings),
-        identifier=SpeakerIdentifier(),
+        identifier=QdrantSpeakerIdentifier.from_settings(qdrant, settings),
+        store=QdrantSpeakerStore.from_settings(qdrant, settings)
     )
 
 def main():
     settings = get_settings()
-    pipeline = build_pipeline(settings)
+    qdrant = create_qdrant_client(settings)
+    ensure_voice_collection(qdrant, settings.qdrant_voice_collection)
+    pipeline = build_pipeline(settings, qdrant)
 
     job = TranscribeJob(
         job_id=str(uuid4()),
