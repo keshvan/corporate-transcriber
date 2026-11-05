@@ -20,5 +20,23 @@ services:
     volumes:
       - ./license:/license:ro
 
+  qdrant:
+    image: qdrant/qdrant:v1.16.3
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes:
+        - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   minio_data:
+  qdrant_data:
