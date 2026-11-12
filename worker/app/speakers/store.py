@@ -4,13 +4,18 @@ import logging
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, PointVectors
 
 from app.config import Settings
-from app.domain import SpeakerEmbeddings, SpeakerMatch
+from app.domain import (
+    EmbeddingSaveResult,
+    EmbeddingStatus,
+    SpeakerEmbeddings,
+    SpeakerMatch,
+)
 from app.speakers.voice_collection import STATUS_UNKNOWN, Key, to_point_vector
 
 log = logging.getLogger("speakers.store")
@@ -23,10 +28,8 @@ _NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "project-memory/voice-profiles")
 def point_id(meeting_id: str, label: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, f"{meeting_id}:{label}"))
 
-
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
+    return datetime.now(UTC)
 
 @dataclass(frozen=True)
 class _Candidate:
@@ -35,7 +38,6 @@ class _Candidate:
     vector: list[float]
     speech_ms: int
     match: SpeakerMatch | None
-
 
 class QdrantSpeakerStore:
     def __init__(
@@ -63,11 +65,11 @@ class QdrantSpeakerStore:
         meeting_id: str,
         embeddings: SpeakerEmbeddings,
         matches: Mapping[str, SpeakerMatch | None],
-    ) -> None:
-        candidates = self._select(meeting_id, embeddings, matches)
+    ) -> dict[str, EmbeddingSaveResult]:
+        candidates, results = self._select(meeting_id, embeddings, matches)
         if not candidates:
             log.info("no speaker embeddings to save", extra={"meeting_id": meeting_id})
-            return
+            return results
 
         created_at = self._clock().isoformat()
 
@@ -84,10 +86,13 @@ class QdrantSpeakerStore:
                 "speaker embeddings not saved: lookup failed",
                 extra={"meeting_id": meeting_id},
             )
-            return
+            for c in candidates:
+                results[c.label] = EmbeddingSaveResult(EmbeddingStatus.FAILED)
+            return results
 
         new = [c for c in candidates if c.point_id not in existing]
         old = [c for c in candidates if c.point_id in existing]
+        failed: set[str] = set()
 
         if new:
             try:
@@ -97,6 +102,7 @@ class QdrantSpeakerStore:
                     "failed to insert new speaker embeddings",
                     extra={"meeting_id": meeting_id},
                 )
+                failed.update(c.point_id for c in new)
         if old:
             try:
                 self._update(meeting_id, embeddings.model, created_at, old)
@@ -105,18 +111,33 @@ class QdrantSpeakerStore:
                     "failed to update existing speaker embeddings",
                     extra={"meeting_id": meeting_id},
                 )
+                failed.update(c.point_id for c in old)
+
+        for c in candidates:
+            results[c.label] = (
+                EmbeddingSaveResult(EmbeddingStatus.FAILED)
+                if c.point_id in failed
+                else EmbeddingSaveResult(EmbeddingStatus.SAVED, c.point_id)
+            )
         log.info(
-            "speaker embeddings saved",
-            extra={"meeting_id": meeting_id, "new": len(new), "updated": len(old)},
+            "speaker embeddings processed",
+            extra={
+                "meeting_id": meeting_id,
+                "new": len(new),
+                "updated": len(old),
+                "failed": len(failed),
+            },
         )
+        return results
 
     def _select(
         self,
         meeting_id: str,
         embeddings: SpeakerEmbeddings,
         matches: Mapping[str, SpeakerMatch | None],
-    ) -> list[_Candidate]:
+    ) -> tuple[list[_Candidate], dict[str, EmbeddingSaveResult]]:
         selected: list[_Candidate] = []
+        results: dict[str, EmbeddingSaveResult] = {}
         for label in sorted(embeddings.vectors):
             vector = to_point_vector(embeddings.vectors[label])
             if vector is None:
@@ -124,6 +145,7 @@ class QdrantSpeakerStore:
                     "speaker skipped: unusable embedding",
                     extra={"meeting_id": meeting_id, "label": label},
                 )
+                results[label] = EmbeddingSaveResult(EmbeddingStatus.NO_EMBEDDING)
                 continue
             speech_ms = embeddings.speech_ms.get(label, 0)
             if speech_ms < self._min_speech_ms:
@@ -135,6 +157,7 @@ class QdrantSpeakerStore:
                         "speech_ms": speech_ms,
                     },
                 )
+                results[label] = EmbeddingSaveResult(EmbeddingStatus.INSUFFICIENT_SPEECH)
                 continue
             selected.append(
                 _Candidate(
@@ -145,7 +168,7 @@ class QdrantSpeakerStore:
                     match=matches.get(label),
                 )
             )
-        return selected
+        return selected, results
 
     def _insert(
         self, meeting_id: str, model: str, created_at: str, new: list[_Candidate]
@@ -170,24 +193,32 @@ class QdrantSpeakerStore:
 
     def _update(
         self, meeting_id: str, model: str, created_at: str, old: list[_Candidate]
-    ) -> None:
+    ) -> set[str]:
         self._client.update_vectors(
             collection_name=self._collection,
             points=[PointVectors(id=c.point_id, vector=c.vector) for c in old],
         )
 
+        failed: set[str] = set()
         for c in old:
-            self._client.set_payload(
-                collection_name=self._collection,
-                payload=_mutable_payload(meeting_id, model, created_at, c),
-                points=[c.point_id],
-            )
+            try:
+                self._client.set_payload(
+                    collection_name=self._collection,
+                    payload=_mutable_payload(meeting_id, model, created_at, c),
+                    points=[c.point_id],
+                )
+            except Exception:
+                log.exception(
+                    "failed to update speaker payload",
+                    extra={"meeting_id": meeting_id, "label": c.label},
+                )
+                failed.add(c.point_id)
+        return failed
 
 
 def _mutable_payload(
     meeting_id: str, model: str, created_at: str, c: _Candidate
 ) -> Payload:
-    """Поля, которые worker вправе перезаписывать."""
     return {
         Key.MEETING_ID: meeting_id,
         Key.LABEL: c.label,
