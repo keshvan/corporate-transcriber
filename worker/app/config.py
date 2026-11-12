@@ -1,11 +1,11 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file="../.env")
+    model_config = SettingsConfigDict(env_file="../.env", extra='allow')
 
     s3_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "minioadmin"
@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     speaker_match_threshold: float = Field(default=0.5, ge=-1.0, le=1.0)
     speaker_save_min_speech_ms: int = Field(default=5_000, ge=0)
     speaker_search_group_size: int = Field(default=3, ge=1)
+
+    postgres_dsn: SecretStr = SecretStr("postgres://postgres:postgres@localhost:5432/project_memory")
+    postgres_pool_min_size: int = Field(default=1, ge=0)
+    postgres_pool_max_size: int = Field(default=4, ge=1)
+    postgres_connect_timeout_s: float = Field(default=10.0, gt=0)
+
+    @model_validator(mode="after")
+    def _check_postgres_pool(self) -> "Settings":
+        if self.postgres_pool_min_size > self.postgres_pool_max_size:
+            raise ValueError("postgres_pool_min_size must be <= postgres_pool_max_size")
+        return self
 
 @lru_cache
 def get_settings() -> Settings:
