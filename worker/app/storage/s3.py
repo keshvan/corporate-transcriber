@@ -61,7 +61,8 @@ class S3Storage:
         key = self._key_from_uri(uri)
         dest.parent.mkdir(parents=True, exist_ok=True)
         tmp = dest.with_name(dest.name + ".part")
-        self._s3.download_file(self._bucket, key, str(tmp))
+        with _translate(uri):
+            self._s3.download_file(self._bucket, key, str(tmp))
         tmp.replace(dest)
         return dest
 

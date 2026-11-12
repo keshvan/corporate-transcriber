@@ -7,6 +7,7 @@ from psycopg_pool import ConnectionPool
 
 from app.domain import SpeakerOutcome
 from app.schemas.transcript import Transcript
+from app.storage.processed_events import record_current_event
 
 log = logging.getLogger("meeting_repository")
 
@@ -87,6 +88,7 @@ class PostgresMeetingResultRepository:
             transcript_id = self._upsert_transcript(conn, mid, transcript)
             speaker_ids = self._upsert_speakers(conn, mid, speakers)
             self._replace_segments(conn, transcript_id, transcript, speaker_ids)
+            record_current_event(conn, mid)
         log.info(
             "meeting result saved",
             extra={
