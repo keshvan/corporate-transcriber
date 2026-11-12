@@ -1,12 +1,19 @@
-from collections.abc import Mapping
 import logging
 import tempfile
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from app.domain import SpeakerEmbeddings, SpeakerMatch, SpeakerTurn
+from app.domain import (
+    EmbeddingSaveResult,
+    EmbeddingStatus,
+    SpeakerEmbeddings,
+    SpeakerMatch,
+    SpeakerOutcome,
+    SpeakerTurn,
+)
 from app.media.ffmpeg import probe_audio, to_wav_16k_mono
 from app.schemas.transcript import Segment, SpeakerInfo, Transcript
 
@@ -34,6 +41,15 @@ class SpeakerStore(Protocol):
         meeting_id: str,
         embeddings: SpeakerEmbeddings,
         matches: Mapping[str, SpeakerMatch | None],
+    ) -> dict[str, EmbeddingSaveResult]: ...
+
+class MeetingResultRepository(Protocol):
+    def ensure_meeting_exists(self, meeting_id: str) -> None: ...
+    def save(
+        self,
+        meeting_id: str,
+        transcript: Transcript,
+        speakers: Sequence[SpeakerOutcome],
     ) -> None: ...
 
 @dataclass(frozen=True)
@@ -60,6 +76,30 @@ def assign_labels(segments: list[Segment], turns: list[SpeakerTurn]) -> list[Seg
         result.append(seg.model_copy(update={"label": label}))
     return result
 
+def build_speaker_outcomes(
+    turns: list[SpeakerTurn],
+    segments: list[Segment],
+    embeddings: SpeakerEmbeddings,
+    matches: Mapping[str, SpeakerMatch | None],
+    saved: Mapping[str, EmbeddingSaveResult],
+) -> list[SpeakerOutcome]:
+    labels = (
+        {t.label for t in turns}
+        | {s.label for s in segments if s.label}
+        | set(embeddings.vectors)
+        | set(embeddings.speech_ms)
+    )
+    no_embedding = EmbeddingSaveResult(EmbeddingStatus.NO_EMBEDDING)
+    return [
+        SpeakerOutcome(
+            label=label,
+            speech_ms=embeddings.speech_ms.get(label),
+            embedding=saved.get(label, no_embedding),
+            match=matches.get(label),
+        )
+        for label in sorted(labels)
+    ]
+
 class TranscribePipeline:
     def __init__(
         self,
@@ -69,6 +109,7 @@ class TranscribePipeline:
         embedder: SpeakerEmbedder,
         identifier: SpeakerIdentifier,
         store: SpeakerStore,
+        results: MeetingResultRepository,
     ) -> None:
         self._storage = storage
         self._asr = asr
@@ -76,10 +117,13 @@ class TranscribePipeline:
         self._embedder = embedder
         self._identifier = identifier
         self._store = store
+        self._results = results
 
     def run(self, job: TranscribeJob):
         ids = {"job_id": job.job_id, "meeting_id": job.meeting_id}
         log.info("pipeline started", extra=ids)
+
+        self._results.ensure_meeting_exists(job.meeting_id)
 
         with tempfile.TemporaryDirectory(prefix=f"job-{job.job_id}") as tmp:
             workdir = Path(tmp)
@@ -114,7 +158,7 @@ class TranscribePipeline:
                 extra={**ids, "identified": sum(1 for m in matches.values() if m)},
             )
 
-            self._store.save(job.meeting_id, embeddings, matches)
+            saved = self._store.save(job.meeting_id, embeddings, matches)
 
             labels = sorted({s.label for s in segments if s.label})
             speakers = []
@@ -129,8 +173,10 @@ class TranscribePipeline:
                     )
                 )
 
-            transcript = transcript.model_copy(
-                update={"segments": segments, "speakers": speakers}
-            )
+            outcomes = build_speaker_outcomes(turns, segments, embeddings, matches, saved)
+
+            self._results.save(job.meeting_id, transcript, outcomes)
+            log.info("results saved to postgres", extra={**ids, "speakers": len(outcomes)})
+
             log.info("job finished", extra=ids)
             return PipelineResult(transcript, embeddings)
