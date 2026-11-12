@@ -12,10 +12,12 @@ dependencies = [
     "boto3>=1.43.110",
     "faster-whisper>=1.2.1",
     "numpy>=2.5.3",
+    "psycopg>=3.3.8",
+    "psycopg-pool>=3.3.3",
     "pyannote-audio>=4.0.7",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
-    "qdrant-client>=1.20.0",
+    "qdrant-client>=1.16.0",
     "soundfile>=0.14.0",
     "speechbrain>=1.1.2",
 ]
