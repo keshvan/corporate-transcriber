@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS transcript_segments;
+DROP TABLE IF EXISTS meeting_speakers;
+DROP TABLE IF EXISTS transcripts;
+DROP TABLE IF EXISTS meetings;
+DROP TABLE IF EXISTS project_participants;
+DROP TABLE IF EXISTS project_memberships;
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS users;
+DROP FUNCTION IF EXISTS set_updated_at();
