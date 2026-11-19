@@ -16,7 +16,6 @@ from app.models.asr import WhisperTranscriber
 from app.models.diarizer import PyannoteDiarizer
 from app.models.embedder import SpeechBrainEmbedder
 from app.pipeline import TranscribePipeline
-from app.speakers.identifier import QdrantSpeakerIdentifier
 from app.speakers.store import QdrantSpeakerStore
 from app.speakers.voice_collection import ensure_voice_collection
 from app.storage.meeting_repository import PostgresMeetingResultRepository
@@ -45,7 +44,6 @@ def build_pipeline(
         asr=asr,
         diarizer=PyannoteDiarizer.from_settings(settings),
         embedder=SpeechBrainEmbedder.from_settings(settings),
-        identifier=QdrantSpeakerIdentifier.from_settings(qdrant, settings),
         store=QdrantSpeakerStore.from_settings(qdrant, settings),
         results=PostgresMeetingResultRepository(pool),
     )

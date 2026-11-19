@@ -18,7 +18,7 @@ class MeetingNotFoundError(LookupError):
         self.meeting_id = meeting_id
 
 
-_MEETING_EXISTS = "SELECT 1 FROM meetings WHERE id = %s"
+_MEETING_EXISTS = "SELECT project_id FROM meetings WHERE id = %s"
 
 _UPSERT_TRANSCRIPT = """
 INSERT INTO transcripts (meeting_id, full_text, language, model)
@@ -32,23 +32,18 @@ RETURNING id
 
 _UPSERT_SPEAKERS = """
 INSERT INTO meeting_speakers
-    (meeting_id, label, speech_ms, qdrant_point_id, embedding_status,
-     suggested_person_id, suggested_score)
-SELECT %(meeting_id)s::uuid, t.label, t.speech_ms, t.point_id, t.status, t.person_id, t.score
+    (meeting_id, label, speech_ms, qdrant_point_id, embedding_status)
+SELECT %(meeting_id)s::uuid, t.label, t.speech_ms, t.point_id, t.status
 FROM unnest(
     %(labels)s::text[],
     %(speech_ms)s::int[],
     %(point_ids)s::uuid[],
-    %(statuses)s::text[],
-    %(person_ids)s::text[],
-    %(scores)s::float8[]
-) AS t(label, speech_ms, point_id, status, person_id, score)
+    %(statuses)s::text[]
+) AS t(label, speech_ms, point_id, status)
 ON CONFLICT (meeting_id, label) DO UPDATE SET
     speech_ms           = EXCLUDED.speech_ms,
     qdrant_point_id     = EXCLUDED.qdrant_point_id,
-    embedding_status    = EXCLUDED.embedding_status,
-    suggested_person_id = EXCLUDED.suggested_person_id,
-    suggested_score     = EXCLUDED.suggested_score
+    embedding_status    = EXCLUDED.embedding_status
 RETURNING label, id
 """
 
@@ -72,9 +67,10 @@ class PostgresMeetingResultRepository:
     def __init__(self, pool: ConnectionPool) -> None:
         self._pool = pool
 
-    def ensure_meeting_exists(self, meeting_id: str) -> None:
+    def ensure_meeting_exists(self, meeting_id: str) -> str:
         with self._pool.connection() as conn:
-            self._require_meeting(conn, UUID(meeting_id))
+            project_id = self._require_meeting(conn, UUID(meeting_id))
+            return str(project_id)
 
     def save(
         self,
@@ -99,9 +95,11 @@ class PostgresMeetingResultRepository:
         )
 
     @staticmethod
-    def _require_meeting(conn: Connection, meeting_id: UUID) -> None:
-        if conn.execute(_MEETING_EXISTS, (meeting_id,)).fetchone() is None:
+    def _require_meeting(conn: Connection, meeting_id: UUID) -> UUID:
+        row = conn.execute(_MEETING_EXISTS, (meeting_id,)).fetchone()
+        if row is None:
             raise MeetingNotFoundError(str(meeting_id))
+        return row[0]
 
     @staticmethod
     def _upsert_transcript(conn: Connection, meeting_id: UUID, transcript: Transcript) -> UUID:
@@ -128,8 +126,6 @@ class PostgresMeetingResultRepository:
                 "speech_ms": [s.speech_ms for s in items],
                 "point_ids": [s.embedding.point_id for s in items],
                 "statuses": [s.embedding.status.value for s in items],
-                "person_ids": [s.match.person_id if s.match else None for s in items],
-                "scores": [s.match.score if s.match else None for s in items],
             },
         ).fetchall()
         return {label: speaker_id for label, speaker_id in rows}
@@ -155,5 +151,5 @@ class PostgresMeetingResultRepository:
             ))
         with conn.cursor() as cur:
             if rows:
-                cur.executemany(_UPSERT_SEGMENT, rows)  # batch, одно соединение
+                cur.executemany(_UPSERT_SEGMENT, rows)
             cur.execute(_DELETE_SEGMENT_TAIL, (transcript_id, len(rows)))

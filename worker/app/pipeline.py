@@ -10,7 +10,6 @@ from app.domain import (
     EmbeddingSaveResult,
     EmbeddingStatus,
     SpeakerEmbeddings,
-    SpeakerMatch,
     SpeakerOutcome,
     SpeakerTurn,
 )
@@ -32,19 +31,16 @@ class Diarizer(Protocol):
 class SpeakerEmbedder(Protocol):
     def embed(self, wav: Path, turns: list[SpeakerTurn]) -> SpeakerEmbeddings: ...
 
-class SpeakerIdentifier(Protocol):
-    def identify(self, embeddings: SpeakerEmbeddings) -> dict[str, SpeakerMatch | None]: ...
-
 class SpeakerStore(Protocol):
     def save(
         self,
         meeting_id: str,
+        project_id: str,
         embeddings: SpeakerEmbeddings,
-        matches: Mapping[str, SpeakerMatch | None],
     ) -> dict[str, EmbeddingSaveResult]: ...
 
 class MeetingResultRepository(Protocol):
-    def ensure_meeting_exists(self, meeting_id: str) -> None: ...
+    def ensure_meeting_exists(self, meeting_id: str) -> str: ...
     def save(
         self,
         meeting_id: str,
@@ -80,7 +76,6 @@ def build_speaker_outcomes(
     turns: list[SpeakerTurn],
     segments: list[Segment],
     embeddings: SpeakerEmbeddings,
-    matches: Mapping[str, SpeakerMatch | None],
     saved: Mapping[str, EmbeddingSaveResult],
 ) -> list[SpeakerOutcome]:
     labels = (
@@ -95,7 +90,7 @@ def build_speaker_outcomes(
             label=label,
             speech_ms=embeddings.speech_ms.get(label),
             embedding=saved.get(label, no_embedding),
-            match=matches.get(label),
+            match=None,
         )
         for label in sorted(labels)
     ]
@@ -107,7 +102,6 @@ class TranscribePipeline:
         asr: Transcriber,
         diarizer: Diarizer,
         embedder: SpeakerEmbedder,
-        identifier: SpeakerIdentifier,
         store: SpeakerStore,
         results: MeetingResultRepository,
     ) -> None:
@@ -115,7 +109,6 @@ class TranscribePipeline:
         self._asr = asr
         self._diarizer = diarizer
         self._embedder = embedder
-        self._identifier = identifier
         self._store = store
         self._results = results
 
@@ -123,7 +116,7 @@ class TranscribePipeline:
         ids = {"job_id": job.job_id, "meeting_id": job.meeting_id}
         log.info("pipeline started", extra=ids)
 
-        self._results.ensure_meeting_exists(job.meeting_id)
+        project_id = self._results.ensure_meeting_exists(job.meeting_id)
 
         with tempfile.TemporaryDirectory(prefix=f"job-{job.job_id}") as tmp:
             workdir = Path(tmp)
@@ -152,28 +145,21 @@ class TranscribePipeline:
             embeddings = self._embedder.embed(wav, turns)
             log.info("embeddings computed", extra={**ids, "speakers": len(embeddings.vectors)})
 
-            matches = self._identifier.identify(embeddings)
-            log.info(
-                "speakers identified",
-                extra={**ids, "identified": sum(1 for m in matches.values() if m)},
-            )
-
-            saved = self._store.save(job.meeting_id, embeddings, matches)
+            saved = self._store.save(job.meeting_id, project_id, embeddings)
 
             labels = sorted({s.label for s in segments if s.label})
             speakers = []
             for label in labels:
-                m = matches.get(label)
                 speakers.append(
                     SpeakerInfo(
                         label=label,
-                        person_id=m.person_id if m else None,
-                        name=m.name if m else None,
-                        score=m.score if m else None,
+                        person_id=None,
+                        name=None,
+                        score=None,
                     )
                 )
 
-            outcomes = build_speaker_outcomes(turns, segments, embeddings, matches, saved)
+            outcomes = build_speaker_outcomes(turns, segments, embeddings, saved)
 
             self._results.save(job.meeting_id, transcript, outcomes)
             log.info("results saved to postgres", extra={**ids, "speakers": len(outcomes)})
