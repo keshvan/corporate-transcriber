@@ -19,6 +19,7 @@ STATUS_CONFIRMED: Final = "confirmed"
 class Key:
     STATUS: Final = "status"
     PERSON_ID: Final = "person_id"
+    PROJECT_ID: Final = "project_id"
     MEETING_ID: Final = "meeting_id"
     LABEL: Final = "label"
     MODEL: Final = "model"
@@ -26,11 +27,9 @@ class Key:
     PINNED: Final = "pinned"
     CREATED_AT: Final = "created_at"
     ATTACHED_AT: Final = "attached_at"
-    SUGGESTED_PERSON_ID: Final = "suggested_person_id"
-    SUGGESTED_SCORE: Final = "suggested_score"
 
 
-INDEXED_FIELDS: Final = (Key.STATUS, Key.PERSON_ID, Key.MODEL)
+INDEXED_FIELDS: Final = (Key.STATUS, Key.PERSON_ID, Key.PROJECT_ID, Key.MODEL)
 
 
 class VoiceCollectionError(RuntimeError):

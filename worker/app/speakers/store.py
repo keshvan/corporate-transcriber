@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -14,7 +14,6 @@ from app.domain import (
     EmbeddingSaveResult,
     EmbeddingStatus,
     SpeakerEmbeddings,
-    SpeakerMatch,
 )
 from app.speakers.voice_collection import STATUS_UNKNOWN, Key, to_point_vector
 
@@ -37,7 +36,6 @@ class _Candidate:
     label: str
     vector: list[float]
     speech_ms: int
-    match: SpeakerMatch | None
 
 class QdrantSpeakerStore:
     def __init__(
@@ -63,10 +61,10 @@ class QdrantSpeakerStore:
     def save(
         self,
         meeting_id: str,
+        project_id: str,
         embeddings: SpeakerEmbeddings,
-        matches: Mapping[str, SpeakerMatch | None],
     ) -> dict[str, EmbeddingSaveResult]:
-        candidates, results = self._select(meeting_id, embeddings, matches)
+        candidates, results = self._select(meeting_id, embeddings)
         if not candidates:
             log.info("no speaker embeddings to save", extra={"meeting_id": meeting_id})
             return results
@@ -96,7 +94,7 @@ class QdrantSpeakerStore:
 
         if new:
             try:
-                self._insert(meeting_id, embeddings.model, created_at, new)
+                self._insert(meeting_id, project_id, embeddings.model, created_at, new)
             except Exception:
                 log.exception(
                     "failed to insert new speaker embeddings",
@@ -105,7 +103,7 @@ class QdrantSpeakerStore:
                 failed.update(c.point_id for c in new)
         if old:
             try:
-                self._update(meeting_id, embeddings.model, created_at, old)
+                self._update(meeting_id, project_id, embeddings.model, created_at, old)
             except Exception:
                 log.exception(
                     "failed to update existing speaker embeddings",
@@ -134,7 +132,6 @@ class QdrantSpeakerStore:
         self,
         meeting_id: str,
         embeddings: SpeakerEmbeddings,
-        matches: Mapping[str, SpeakerMatch | None],
     ) -> tuple[list[_Candidate], dict[str, EmbeddingSaveResult]]:
         selected: list[_Candidate] = []
         results: dict[str, EmbeddingSaveResult] = {}
@@ -165,13 +162,12 @@ class QdrantSpeakerStore:
                     label=label,
                     vector=vector,
                     speech_ms=speech_ms,
-                    match=matches.get(label),
                 )
             )
         return selected, results
 
     def _insert(
-        self, meeting_id: str, model: str, created_at: str, new: list[_Candidate]
+        self, meeting_id: str, project_id: str, model: str, created_at: str, new: list[_Candidate]
     ) -> None:
         self._client.upsert(
             collection_name=self._collection,
@@ -184,7 +180,7 @@ class QdrantSpeakerStore:
                         Key.PERSON_ID: None,
                         Key.PINNED: False,
                         Key.ATTACHED_AT: None,
-                        **_mutable_payload(meeting_id, model, created_at, c),
+                        **_mutable_payload(meeting_id, project_id, model, created_at, c),
                     },
                 )
                 for c in new
@@ -192,7 +188,7 @@ class QdrantSpeakerStore:
         )
 
     def _update(
-        self, meeting_id: str, model: str, created_at: str, old: list[_Candidate]
+        self, meeting_id: str, project_id: str, model: str, created_at: str, old: list[_Candidate]
     ) -> set[str]:
         self._client.update_vectors(
             collection_name=self._collection,
@@ -204,7 +200,7 @@ class QdrantSpeakerStore:
             try:
                 self._client.set_payload(
                     collection_name=self._collection,
-                    payload=_mutable_payload(meeting_id, model, created_at, c),
+                    payload=_mutable_payload(meeting_id, project_id, model, created_at, c),
                     points=[c.point_id],
                 )
             except Exception:
@@ -217,14 +213,13 @@ class QdrantSpeakerStore:
 
 
 def _mutable_payload(
-    meeting_id: str, model: str, created_at: str, c: _Candidate
+    meeting_id: str, project_id: str, model: str, created_at: str, c: _Candidate
 ) -> Payload:
     return {
         Key.MEETING_ID: meeting_id,
+        Key.PROJECT_ID: project_id,
         Key.LABEL: c.label,
         Key.MODEL: model,
         Key.SPEECH_MS: c.speech_ms,
         Key.CREATED_AT: created_at,
-        Key.SUGGESTED_PERSON_ID: c.match.person_id if c.match else None,
-        Key.SUGGESTED_SCORE: c.match.score if c.match else None,
     }

@@ -35,7 +35,7 @@ class PyannoteDiarizer:
     def from_settings(cls, s: Settings) -> PyannoteDiarizer:
         return cls(
             model_name=s.worker_diarization_model,
-            hf_token=s.hf_token.get_secret_value(),
+            hf_token=s.hf_token.get_secret_value(), # type: ignore
             device=s.worker_device,
             min_speakers=s.worker_min_speakers,
             max_speakers=s.worker_max_speakers,

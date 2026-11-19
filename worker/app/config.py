@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
 
-    qdrant_voice_collection: str = "voice_profiles"
+    qdrant_voice_collection: str = "voice_profiles_v2"
 
     speaker_match_threshold: float = Field(default=0.5, ge=-1.0, le=1.0)
     speaker_save_min_speech_ms: int = Field(default=5_000, ge=0)
