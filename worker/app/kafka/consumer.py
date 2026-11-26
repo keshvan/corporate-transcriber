@@ -19,7 +19,7 @@ from app.kafka.errors import (
     classify,
 )
 from app.pipeline import PipelineResult, TranscribeJob
-from app.schemas.events import ConsumedMessage, DeadLetter, MeetingProcessingRequested
+from app.schemas.events import ConsumedMessage, DeadLetter, MeetingProcessingRequest
 from app.storage.processed_events import recording_event
 
 log = logging.getLogger("messaging.consumer")
@@ -86,11 +86,11 @@ def _probe_event_id(raw: bytes) -> str | None:
     return event_id[:_MAX_EVENT_ID_LENGTH] if event_id is not None else None
 
 
-def parse_event(raw: bytes | None) -> MeetingProcessingRequested:
+def parse_event(raw: bytes | None) -> MeetingProcessingRequest:
     if not raw:
         raise EventError("invalid_json", "message value is empty")
     try:
-        return MeetingProcessingRequested.model_validate_json(raw)
+        return MeetingProcessingRequest.model_validate_json(raw)
     except ValidationError as exc:
         details = exc.errors(include_input=False, include_url=False)
         text = "; ".join(
@@ -177,7 +177,7 @@ class MeetingConsumer:
         return self._run_attempts(message, event, elog)
 
     def _run_attempts(
-        self, message: ConsumedMessage, event: MeetingProcessingRequested, elog: _MessageLog
+        self, message: ConsumedMessage, event: MeetingProcessingRequest, elog: _MessageLog
     ) -> Disposition:
         event_id = str(event.event_id)
         attempt = 0
@@ -206,7 +206,7 @@ class MeetingConsumer:
                 return Disposition.ABANDONED
             self._source.keepalive()
 
-    def _handle(self, event: MeetingProcessingRequested, alog: _MessageLog) -> HandlingResult:
+    def _handle(self, event: MeetingProcessingRequest, alog: _MessageLog) -> HandlingResult:
         if self._processed_events.is_processed(event.event_id):
             alog.info("event already processed, skipping pipeline")
             return HandlingResult.DUPLICATE
@@ -221,7 +221,7 @@ class MeetingConsumer:
             self._pipeline.run(job)
         return HandlingResult.PROCESSED
 
-    def _attempt(self, event: MeetingProcessingRequested, alog: _MessageLog) -> HandlingResult | Failure:
+    def _attempt(self, event: MeetingProcessingRequest, alog: _MessageLog) -> HandlingResult | Failure:
         started = time.monotonic()
         alog.info("processing started")
         try:

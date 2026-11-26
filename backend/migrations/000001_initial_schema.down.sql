@@ -1,6 +1,7 @@
 DROP TABLE IF EXISTS transcript_segments;
 DROP TABLE IF EXISTS meeting_speakers;
 DROP TABLE IF EXISTS transcripts;
+DROP TABLE IF EXISTS documents;
 DROP TABLE IF EXISTS meetings;
 DROP TABLE IF EXISTS project_participants;
 DROP TABLE IF EXISTS project_memberships;
