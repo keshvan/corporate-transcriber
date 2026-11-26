@@ -5,3 +5,7 @@ __pycache__/
 .ruff_cache/
 
 license/
+
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
