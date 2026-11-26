@@ -141,6 +141,7 @@ class TranscribePipeline:
             )
 
             segments = assign_labels(transcript.segments, turns)
+            labeled_transcript = transcript.model_copy(update={"segments": segments})
 
             embeddings = self._embedder.embed(wav, turns)
             log.info("embeddings computed", extra={**ids, "speakers": len(embeddings.vectors)})
@@ -161,8 +162,8 @@ class TranscribePipeline:
 
             outcomes = build_speaker_outcomes(turns, segments, embeddings, saved)
 
-            self._results.save(job.meeting_id, transcript, outcomes)
+            self._results.save(job.meeting_id, labeled_transcript, outcomes)
             log.info("results saved to postgres", extra={**ids, "speakers": len(outcomes)})
 
             log.info("job finished", extra=ids)
-            return PipelineResult(transcript, embeddings)
+            return PipelineResult(labeled_transcript, embeddings)
