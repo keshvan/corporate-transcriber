@@ -11,7 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(meetingHandler *handler.MeetingHandler) *chi.Mux {
+func NewRouter(meetingHandler *handler.MeetingHandler, documentHandler *handler.DocumentHandler) *chi.Mux {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
@@ -24,6 +24,7 @@ func NewRouter(meetingHandler *handler.MeetingHandler) *chi.Mux {
 	})
 
 	meetingHandler.RegisterRoutes(router)
+	documentHandler.RegisterRoutes(router)
 	router.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "route not found")
 	})

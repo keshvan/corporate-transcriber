@@ -49,12 +49,72 @@ CREATE TABLE project_participants (
 );
 
 CREATE TABLE meetings (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    title      TEXT NOT NULL CHECK (btrim(title) <> ''),
-    meeting_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id          UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    title               TEXT NOT NULL CHECK (btrim(title) <> ''),
+    meeting_at          TIMESTAMPTZ,
+    source_object_key   TEXT UNIQUE,
+    source_filename     TEXT,
+    source_content_type TEXT,
+    source_size_bytes   BIGINT,
+    upload_status       TEXT NOT NULL DEFAULT 'not_uploaded'
+        CHECK (upload_status IN ('not_uploaded', 'awaiting_upload', 'uploaded')),
+    processing_status  TEXT NOT NULL DEFAULT 'not_queued'
+        CHECK (processing_status IN ('not_queued', 'queued', 'processing', 'processed', 'failed')),
+    source_uploaded_at  TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT meetings_source_size_nonnegative
+        CHECK (source_size_bytes IS NULL OR source_size_bytes >= 0),
+    CONSTRAINT meetings_source_upload_state_check
+        CHECK (
+            (upload_status = 'not_uploaded'
+                AND source_object_key IS NULL
+                AND source_filename IS NULL
+                AND source_content_type IS NULL
+                AND source_size_bytes IS NULL
+                AND source_uploaded_at IS NULL)
+            OR
+            (upload_status = 'awaiting_upload'
+                AND source_object_key IS NOT NULL
+                AND btrim(source_object_key) <> ''
+                AND source_filename IS NOT NULL
+                AND btrim(source_filename) <> ''
+                AND source_content_type IS NOT NULL
+                AND btrim(source_content_type) <> ''
+                AND source_uploaded_at IS NULL)
+            OR
+            (upload_status = 'uploaded'
+                AND source_object_key IS NOT NULL
+                AND btrim(source_object_key) <> ''
+                AND source_filename IS NOT NULL
+                AND btrim(source_filename) <> ''
+                AND source_content_type IS NOT NULL
+                AND btrim(source_content_type) <> ''
+                AND source_size_bytes IS NOT NULL
+                AND source_uploaded_at IS NOT NULL)
+        ),
+    CONSTRAINT meetings_processing_requires_uploaded_source
+        CHECK (processing_status = 'not_queued' OR upload_status = 'uploaded')
+);
+
+-- Documents are project-scoped and retain the object key and upload/processing
+-- state needed to verify uploads and dispatch processing jobs.
+CREATE TABLE documents (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id        UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    title             TEXT NOT NULL CHECK (btrim(title) <> ''),
+    original_filename TEXT NOT NULL CHECK (btrim(original_filename) <> ''),
+    content_type      TEXT NOT NULL CHECK (btrim(content_type) <> ''),
+    object_key        TEXT NOT NULL UNIQUE CHECK (btrim(object_key) <> ''),
+    size_bytes        BIGINT CHECK (size_bytes IS NULL OR size_bytes >= 0),
+    status            TEXT NOT NULL DEFAULT 'awaiting_upload'
+        CHECK (status IN ('awaiting_upload', 'queued', 'processing', 'processed', 'failed')),
+    uploaded_at       TIMESTAMPTZ,
+    created_by        UUID REFERENCES users (id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
 );
 
 CREATE TABLE transcripts (
@@ -107,6 +167,7 @@ CREATE INDEX transcript_segments_speaker_idx
     ON transcript_segments (meeting_speaker_id) WHERE meeting_speaker_id IS NOT NULL;
 CREATE INDEX meetings_project_date_idx ON meetings (project_id, meeting_at DESC);
 CREATE INDEX project_participants_name_idx ON project_participants (project_id, display_name);
+CREATE INDEX documents_project_created_idx ON documents (project_id, created_at DESC);
 
 CREATE TRIGGER users_set_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -115,6 +176,8 @@ CREATE TRIGGER projects_set_updated_at BEFORE UPDATE ON projects
 CREATE TRIGGER project_participants_set_updated_at BEFORE UPDATE ON project_participants
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER meetings_set_updated_at BEFORE UPDATE ON meetings
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER documents_set_updated_at BEFORE UPDATE ON documents
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER transcripts_set_updated_at BEFORE UPDATE ON transcripts
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

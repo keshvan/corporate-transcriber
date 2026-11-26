@@ -3,11 +3,33 @@ package entity
 import "time"
 
 type Meeting struct {
-	ID        string     `json:"id"`
-	ProjectID string     `json:"project_id"`
-	Title     string     `json:"title"`
-	MeetingAt *time.Time `json:"meeting_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID                string     `json:"id"`
+	ProjectID         string     `json:"project_id"`
+	Title             string     `json:"title"`
+	MeetingAt         *time.Time `json:"meeting_at,omitempty"`
+	SourceObjectKey   *string    `json:"source_object_key,omitempty"`
+	SourceFilename    *string    `json:"source_filename,omitempty"`
+	SourceContentType *string    `json:"source_content_type,omitempty"`
+	SourceSizeBytes   *int64     `json:"source_size_bytes,omitempty"`
+	UploadStatus      string     `json:"upload_status"`
+	ProcessingStatus  string     `json:"processing_status"`
+	SourceUploadedAt  *time.Time `json:"source_uploaded_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
+type Document struct {
+	ID               string     `json:"id"`
+	ProjectID        string     `json:"project_id"`
+	Title            string     `json:"title"`
+	OriginalFilename string     `json:"original_filename"`
+	ContentType      string     `json:"content_type"`
+	ObjectKey        string     `json:"object_key"`
+	SizeBytes        *int64     `json:"size_bytes,omitempty"`
+	Status           string     `json:"status"`
+	UploadedAt       *time.Time `json:"uploaded_at,omitempty"`
+	CreatedBy        *string    `json:"created_by,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type MeetingTranscript struct {

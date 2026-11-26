@@ -17,7 +17,7 @@ class MeetingProcessingPayload(BaseModel):
     audio_object_key: str
     language: str | None = None
 
-class MeetingProcessingRequested(BaseModel):
+class MeetingProcessingRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     event_id: UUID
